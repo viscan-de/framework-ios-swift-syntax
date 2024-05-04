@@ -136,10 +136,22 @@ for ((i = 0; i < ${#PLATFORMS[@]}; i += 2)); do
         # FIXME: figure out how to make xcodebuild output the .a file directly. For now, we package it ourselves.
         ar -crs "$OUTPUTS_PATH/$ARCH/$LIBRARY_NAME" $DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/*.build/Objects-normal/$ARCH/*.o
         LIPOFILES="$LIPOFILES $OUTPUTS_PATH/$ARCH/$LIBRARY_NAME"
-        
+
         for INTERFFILE in $OUTPUTS_PATH/$ARCH/*.swiftinterface; do 
             INTERFFILE=$(basename $INTERFFILE)
-            cp $OUTPUTS_PATH/$ARCH/$INTERFFILE "$OUTPUTS_PATH/$ARCH-$INTERFFILE"
+            INPUTFILE=$OUTPUTS_PATH/$ARCH/$INTERFFILE
+            OUTPUTFILE=$OUTPUTS_PATH/$INTERFFILE
+            OUTPUTTMPFILE=$OUTPUTS_PATH/tmp_$INTERFFILE
+            if test -f "$OUTPUTFILE"; then
+                ARCH1=$(grep -o '\/\/ swift-module-flags: -target [^ ]*' $OUTPUTFILE)
+                ARCH1=${ARCH1##* }
+                ARCH2=$(grep -o '\/\/ swift-module-flags: -target [^ ]*' $INPUTFILE)
+                ARCH2=${ARCH2##* }
+                sed "s/\/\/ swift-module-flags\: -target .* -/\/\/ swift-module-flags\: -target ${ARCH1} -target ${ARCH2} -/" "$OUTPUTFILE" > "$OUTPUTTMPFILE"
+                mv "$OUTPUTTMPFILE" "$OUTPUTFILE"
+            else
+                cp "$INPUTFILE" "$OUTPUTFILE"
+            fi
         done
     done 
     lipo $LIPOFILES -create -output $OUTPUTS_PATH/$LIBRARY_NAME
