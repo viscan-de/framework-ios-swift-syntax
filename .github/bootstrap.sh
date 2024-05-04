@@ -5,7 +5,6 @@ SWIFT_SYNTAX_NAME="swift-syntax"
 SWIFT_SYNTAX_REPOSITORY_URL="https://github.com/apple/$SWIFT_SYNTAX_NAME.git"
 SEMVER_PATTERN="^[0-9]+\.[0-9]+\.[0-9]+$"
 WRAPPER_NAME="SwiftSyntaxWrapper"
-ARCH="arm64"
 CONFIGURATION="release"
 DERIVED_DATA_PATH="$PWD/derivedData"
 
@@ -93,9 +92,9 @@ MODULES=(
 
 PLATFORMS=(
     # xcodebuild destination    XCFramework folder name
-    "macos"                     "macos-$ARCH"
-    "iOS Simulator"             "ios-$ARCH-simulator"
-    "iOS"                       "ios-$ARCH"
+    "macos"                     "macos_"
+    "iOS Simulator"             "ios_simulator"
+    "iOS"                       "ios_"
 )
 
 XCODEBUILD_LIBRARIES=""
@@ -108,8 +107,8 @@ for ((i = 0; i < ${#PLATFORMS[@]}; i += 2)); do
     XCFRAMEWORK_PLATFORM_NAME="${PLATFORMS[i+1]}"
 
     OUTPUTS_PATH="${PLATFORMS_OUTPUTS_PATH}/${XCFRAMEWORK_PLATFORM_NAME}"
-    LIBRARY_PATH="${OUTPUTS_PATH}/lib${WRAPPER_NAME}.a"
-    XCODEBUILD_LIBRARIES="$XCODEBUILD_LIBRARIES -library $LIBRARY_PATH"
+    LIBRARY_PATH="/lib${WRAPPER_NAME}.a"
+    
 
     mkdir -p "$OUTPUTS_PATH"
 
@@ -124,13 +123,27 @@ for ((i = 0; i < ${#PLATFORMS[@]}; i += 2)); do
         | xcbeautify
 
     for MODULE in ${MODULES[@]}; do
-        ls -oh "$DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/${MODULE}.build/Objects-normal/"
-        INTERFACE_PATH="$DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/${MODULE}.build/Objects-normal/$ARCH/${MODULE}.swiftinterface"
-        cp $INTERFACE_PATH "$OUTPUTS_PATH"
+        for ARCH in $DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/${MODULE}.build/Objects-normal/*/ ; do
+            ARCH=$(basename $ARCH)
+            echo $ARCH
+            INTERFACE_PATH="$DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/${MODULE}.build/Objects-normal/$ARCH/${MODULE}.swiftinterface"
+            mkdir -p "$OUTPUTS_PATH/$ARCH"
+            cp $INTERFACE_PATH "$OUTPUTS_PATH/$ARCH"
+        done 
     done
 
-    # FIXME: figure out how to make xcodebuild output the .a file directly. For now, we package it ourselves.
-    ar -crs "$LIBRARY_PATH" $DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/*.build/Objects-normal/$ARCH/Binary/*.o
+    LIPOFILES=""
+    for ARCH in $OUTPUTS_PATH/*/ ; do
+        ARCH=$(basename $ARCH)
+        echo $ARCH
+        
+        # FIXME: figure out how to make xcodebuild output the .a file directly. For now, we package it ourselves.
+        ar -crs "$OUTPUTS_PATH/$ARCH/$LIBRARY_PATH" $DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/*.build/Objects-normal/$ARCH/*.o
+        LIPOFILES="$LIPOFILES $OUTPUTS_PATH/$ARCH/$LIBRARY_PATH"
+        cp $OUTPUTS_PATH/$ARCH/*.swiftinterface "$OUTPUTS_PATH/"
+    done 
+    lipo $LIPOFILES -create -output $OUTPUTS_PATH/$LIBRARY_PATH
+    XCODEBUILD_LIBRARIES="$XCODEBUILD_LIBRARIES -library $OUTPUTS_PATH/$LIBRARY_PATH"
 done
 
 cd ..
@@ -146,10 +159,14 @@ xcodebuild -quiet -create-xcframework \
     $XCODEBUILD_LIBRARIES \
     -output "${XCFRAMEWORK_PATH}" >/dev/null
 
-for ((i = 1; i < ${#PLATFORMS[@]}; i += 2)); do
-    XCFRAMEWORK_PLATFORM_NAME="${PLATFORMS[i]}"
-    OUTPUTS_PATH="${PLATFORMS_OUTPUTS_PATH}/${XCFRAMEWORK_PLATFORM_NAME}"
-    cp $OUTPUTS_PATH/*.swiftinterface "$XCFRAMEWORK_PATH/$XCFRAMEWORK_PLATFORM_NAME"
+for ARCH in $XCFRAMEWORK_PATH/*/ ; do
+    ARCH=$(basename $ARCH)
+    echo $ARCH
+    DEST="$XCFRAMEWORK_PATH/$ARCH"
+    SOURCE="${PLATFORMS_OUTPUTS_PATH}/$(echo $ARCH | cut -d'-' -f 1)_$(echo $ARCH | cut -d'-' -f 3)/*.swiftinterface"
+    echo $SOURCE
+    echo $DEST
+    cp  $SOURCE $DEST/
 done
 
 zip --quiet --recurse-paths $XCFRAMEWORK_NAME.zip $XCFRAMEWORK_NAME
