@@ -179,7 +179,7 @@ CHECKSUM=$(swift package compute-checksum $XCFRAMEWORK_NAME.zip)
 URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$SWIFT_SYNTAX_VERSION/$XCFRAMEWORK_NAME.zip"
 
 tee Package.swift <<EOF
-// swift-tools-version: 5.10
+// swift-tools-version: 5.9
 
 import PackageDescription
 
