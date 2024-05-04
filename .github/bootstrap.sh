@@ -148,7 +148,7 @@ for ((i = 0; i < ${#PLATFORMS[@]}; i += 2)); do
                 ARCH2=$(grep -o '\/\/ swift-module-flags: -target [^ ]*' $INPUTFILE)
                 ARCH2=${ARCH2##* }
                 # sed "s/\/\/ swift-module-flags\: -target .* -/\/\/ swift-module-flags\: -target ${ARCH1} -target ${ARCH2} -/" "$OUTPUTFILE" > "$OUTPUTTMPFILE"
-                sed "s/\/\/ swift-module-flags\: -target .* -/\/\/ swift-module-flags\: -/" "$OUTPUTFILE" > "$OUTPUTTMPFILE"
+                sed "s/\/\/ swift-module-flags\: -target [^ ]* -/\/\/ swift-module-flags\: -/" "$OUTPUTFILE" > "$OUTPUTTMPFILE"
                 mv "$OUTPUTTMPFILE" "$OUTPUTFILE"
             else
                 cp "$INPUTFILE" "$OUTPUTFILE"
