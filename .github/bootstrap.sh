@@ -107,8 +107,7 @@ for ((i = 0; i < ${#PLATFORMS[@]}; i += 2)); do
     XCFRAMEWORK_PLATFORM_NAME="${PLATFORMS[i+1]}"
 
     OUTPUTS_PATH="${PLATFORMS_OUTPUTS_PATH}/${XCFRAMEWORK_PLATFORM_NAME}"
-    LIBRARY_PATH="/lib${WRAPPER_NAME}.a"
-    
+    LIBRARY_NAME="lib${WRAPPER_NAME}.a"
 
     mkdir -p "$OUTPUTS_PATH"
 
@@ -125,7 +124,6 @@ for ((i = 0; i < ${#PLATFORMS[@]}; i += 2)); do
     for MODULE in ${MODULES[@]}; do
         for ARCH in $DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/${MODULE}.build/Objects-normal/*/ ; do
             ARCH=$(basename $ARCH)
-            echo $ARCH
             INTERFACE_PATH="$DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/${MODULE}.build/Objects-normal/$ARCH/${MODULE}.swiftinterface"
             mkdir -p "$OUTPUTS_PATH/$ARCH"
             cp $INTERFACE_PATH "$OUTPUTS_PATH/$ARCH"
@@ -135,15 +133,17 @@ for ((i = 0; i < ${#PLATFORMS[@]}; i += 2)); do
     LIPOFILES=""
     for ARCH in $OUTPUTS_PATH/*/ ; do
         ARCH=$(basename $ARCH)
-        echo $ARCH
-        
         # FIXME: figure out how to make xcodebuild output the .a file directly. For now, we package it ourselves.
-        ar -crs "$OUTPUTS_PATH/$ARCH/$LIBRARY_PATH" $DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/*.build/Objects-normal/$ARCH/*.o
-        LIPOFILES="$LIPOFILES $OUTPUTS_PATH/$ARCH/$LIBRARY_PATH"
-        cp $OUTPUTS_PATH/$ARCH/*.swiftinterface "$OUTPUTS_PATH/"
+        ar -crs "$OUTPUTS_PATH/$ARCH/$LIBRARY_NAME" $DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/*.build/Objects-normal/$ARCH/*.o
+        LIPOFILES="$LIPOFILES $OUTPUTS_PATH/$ARCH/$LIBRARY_NAME"
+        
+        for INTERFFILE in $OUTPUTS_PATH/$ARCH/*.swiftinterface; do 
+            INTERFFILE=$(basename $INTERFFILE)
+            cp $OUTPUTS_PATH/$ARCH/$INTERFFILE "$OUTPUTS_PATH/$ARCH-$INTERFFILE"
+        done
     done 
-    lipo $LIPOFILES -create -output $OUTPUTS_PATH/$LIBRARY_PATH
-    XCODEBUILD_LIBRARIES="$XCODEBUILD_LIBRARIES -library $OUTPUTS_PATH/$LIBRARY_PATH"
+    lipo $LIPOFILES -create -output $OUTPUTS_PATH/$LIBRARY_NAME
+    XCODEBUILD_LIBRARIES="$XCODEBUILD_LIBRARIES -library $OUTPUTS_PATH/$LIBRARY_NAME"
 done
 
 cd ..
@@ -161,11 +161,8 @@ xcodebuild -quiet -create-xcframework \
 
 for ARCH in $XCFRAMEWORK_PATH/*/ ; do
     ARCH=$(basename $ARCH)
-    echo $ARCH
     DEST="$XCFRAMEWORK_PATH/$ARCH"
     SOURCE="${PLATFORMS_OUTPUTS_PATH}/$(echo $ARCH | cut -d'-' -f 1)_$(echo $ARCH | cut -d'-' -f 3)/*.swiftinterface"
-    echo $SOURCE
-    echo $DEST
     cp  $SOURCE $DEST/
 done
 
