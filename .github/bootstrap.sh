@@ -124,7 +124,6 @@ for ((i = 0; i < ${#PLATFORMS[@]}; i += 2)); do
     for MODULE in ${MODULES[@]}; do
         for ARCH in $DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/${MODULE}.build/Objects-normal/*/ ; do
             ARCH=$(basename $ARCH)
-            echo $ARCH
             INTERFACE_PATH="$DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/${MODULE}.build/Objects-normal/$ARCH/${MODULE}.swiftinterface"
             mkdir -p "$OUTPUTS_PATH/$ARCH"
             cp $INTERFACE_PATH "$OUTPUTS_PATH/$ARCH"
@@ -175,11 +174,8 @@ xcodebuild -quiet -create-xcframework \
 
 for ARCH in $XCFRAMEWORK_PATH/*/ ; do
     ARCH=$(basename $ARCH)
-    echo $ARCH
     DEST="$XCFRAMEWORK_PATH/$ARCH"
     SOURCE="${PLATFORMS_OUTPUTS_PATH}/$(echo $ARCH | cut -d'-' -f 1)_$(echo $ARCH | cut -d'-' -f 3)/*.swiftinterface"
-    echo $SOURCE
-    echo $DEST
     cp  $SOURCE $DEST/
 done
 
