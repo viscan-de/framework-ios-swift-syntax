@@ -11,7 +11,7 @@ let package = Package(
         .binaryTarget(
             name: "SwiftSyntaxWrapper",
             url: "https://github.com/vigram-sw/framework-ios-swift-syntax/releases/download/510.0.1/SwiftSyntaxWrapper.xcframework.zip",
-            checksum: "8d7ac243c91040c488b487d3a2262dc3cb39c908d9a04be2822c837e9798c65d"
+            checksum: "27408bb49587f80273de10b8b7827b1356765d0952aad5083f6a61c6a5df1361"
         ),
     ]
 )
