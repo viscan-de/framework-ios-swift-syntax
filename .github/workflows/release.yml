@@ -34,3 +34,8 @@ jobs:
         body: Release from swift-syntax ${{ inputs.swift_syntax_tag }}
         files: "*.xcframework.zip"
         fail_on_unmatched_files: true
+    - name: Remove Package.swift from main branch
+      run: |
+        git rm Package.swift
+        git commit -m "chore: remove Package.swift from main (see release ${{ inputs.swift_syntax_tag }})"
+        git push

@@ -2,8 +2,6 @@
 
 SWIFT_SYNTAX_VERSION=$1
 SWIFT_SYNTAX_NAME="swift-syntax"
-SWIFT_SYNTAX_REPOSITORY_URL="https://github.com/apple/$SWIFT_SYNTAX_NAME.git"
-SEMVER_PATTERN="^[0-9]+\.[0-9]+\.[0-9]+$"
 WRAPPER_NAME="SwiftSyntaxWrapper"
 CONFIGURATION="Release"
 DERIVED_DATA_PATH="$PWD/derivedData"
@@ -12,68 +10,42 @@ DERIVED_DATA_PATH="$PWD/derivedData"
 # Verify input
 #
 
-if [ -z "$SWIFT_SYNTAX_VERSION" ]; then
+if [[ -z "$SWIFT_SYNTAX_VERSION" ]]; then
     echo "Swift syntax version (git tag) must be supplied as the first argument"
     exit 1
 fi
 
-if ! [[ $SWIFT_SYNTAX_VERSION =~ $SEMVER_PATTERN ]]; then
+if ! [[ $SWIFT_SYNTAX_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "The given version ($SWIFT_SYNTAX_VERSION) does not have the right format (expected X.Y.Z)."
     exit 1
 fi
 
-#
-# Print input
-#
-
-cat << EOF
-
-Input:
-swift-syntax version to build:  $SWIFT_SYNTAX_VERSION
-
-EOF
+echo ""
+echo "Building swift-syntax $SWIFT_SYNTAX_VERSION → $WRAPPER_NAME.xcframework"
+echo ""
 
 set -euxo pipefail
 
 #
-# Clone package
+# Clone and patch package
 #
 
-git clone --branch $SWIFT_SYNTAX_VERSION --single-branch $SWIFT_SYNTAX_REPOSITORY_URL
+git clone --branch "$SWIFT_SYNTAX_VERSION" --single-branch "https://github.com/apple/$SWIFT_SYNTAX_NAME.git"
 
-#
-# Add static wrapper product
-#
-
-# 602.0.0+: products is a standalone variable referenced in Package()
-# Older: products is an inline array inside Package()
-if grep -q "^  products: products,$" "$SWIFT_SYNTAX_NAME/Package.swift"; then
-    sed -i '' "s/^  products: products,$/  products: products + [.library(name: \"${WRAPPER_NAME}\", type: .static, targets: [\"${WRAPPER_NAME}\"])],/" "$SWIFT_SYNTAX_NAME/Package.swift"
-else
-    sed -i '' -E "s/(products: \[)$/\1\n    .library(name: \"${WRAPPER_NAME}\", type: .static, targets: [\"${WRAPPER_NAME}\"]),/g" "$SWIFT_SYNTAX_NAME/Package.swift"
-fi
-
-#
-# Add target for wrapper product
-#
-
-# Match both 2-space indent (602.0.0+) and 4-space indent (older versions)
-sed -i '' -E "s/^( {2,4}targets: \[)$/\1\n    .target(name: \"${WRAPPER_NAME}\", dependencies: [\"SwiftCompilerPlugin\", \"SwiftSyntax\", \"SwiftSyntaxBuilder\", \"SwiftSyntaxMacros\", \"SwiftSyntaxMacrosTestSupport\"]),/" "$SWIFT_SYNTAX_NAME/Package.swift"
-
-# for swift 600.x.y
+# Remove Swift 6 language version requirement present in 600.x.y
 sed -i '' 's/, .version("6")//g' "$SWIFT_SYNTAX_NAME/Package.swift"
 
-cat "$SWIFT_SYNTAX_NAME/Package.swift"
+# Append the wrapper product and target. Package is a class so its properties
+# are mutable after construction — the same pattern swift-syntax itself uses
+# for the SwiftSyntax-all target. Works regardless of Package.swift structure.
+cat >> "$SWIFT_SYNTAX_NAME/Package.swift" << EOF
+package.products.append(.library(name: "$WRAPPER_NAME", type: .static, targets: ["$WRAPPER_NAME"]))
+package.targets.append(.target(name: "$WRAPPER_NAME", dependencies: ["SwiftCompilerPlugin", "SwiftSyntax", "SwiftSyntaxBuilder", "SwiftSyntaxMacros", "SwiftSyntaxMacrosTestSupport"]))
+EOF
 
-#
-# Add exported imports to wrapper target
-#
-
-WRAPPER_TARGET_SOURCES_PATH="$SWIFT_SYNTAX_NAME/Sources/$WRAPPER_NAME"
-
-mkdir -p $WRAPPER_TARGET_SOURCES_PATH
-
-tee $WRAPPER_TARGET_SOURCES_PATH/ExportedImports.swift <<EOF
+# Add exported imports source file for the wrapper target
+mkdir -p "$SWIFT_SYNTAX_NAME/Sources/$WRAPPER_NAME"
+cat > "$SWIFT_SYNTAX_NAME/Sources/$WRAPPER_NAME/ExportedImports.swift" << EOF
 public import SwiftCompilerPlugin
 public import SwiftSyntax
 public import SwiftSyntaxBuilder
@@ -99,72 +71,67 @@ MODULES=(
     "$WRAPPER_NAME"
 )
 
-PLATFORMS=(
-    # xcodebuild destination    XCFramework folder name
-    "macos"                     "macos_"
-    "iOS Simulator"             "ios_simulator"
-    "iOS"                       "ios_"
-)
+# Parallel arrays: xcodebuild destination name → XCFramework platform folder prefix
+PLATFORMS_XCODE=("macos"  "iOS Simulator"  "iOS")
+PLATFORMS_XCFW=( "macos_" "ios_simulator"  "ios_")
 
 XCODEBUILD_LIBRARIES=""
 PLATFORMS_OUTPUTS_PATH="$PWD/outputs"
+LIBRARY_NAME="lib${WRAPPER_NAME}.a"
 
-cd $SWIFT_SYNTAX_NAME
+cd "$SWIFT_SYNTAX_NAME"
 
-for ((i = 0; i < ${#PLATFORMS[@]}; i += 2)); do
-    XCODEBUILD_PLATFORM_NAME="${PLATFORMS[i]}"
-    XCFRAMEWORK_PLATFORM_NAME="${PLATFORMS[i+1]}"
-
-    OUTPUTS_PATH="${PLATFORMS_OUTPUTS_PATH}/${XCFRAMEWORK_PLATFORM_NAME}"
-    LIBRARY_NAME="lib${WRAPPER_NAME}.a"
+for ((i = 0; i < ${#PLATFORMS_XCODE[@]}; i++)); do
+    XCODEBUILD_PLATFORM="${PLATFORMS_XCODE[$i]}"
+    XCFW_PLATFORM="${PLATFORMS_XCFW[$i]}"
+    OUTPUTS_PATH="$PLATFORMS_OUTPUTS_PATH/$XCFW_PLATFORM"
 
     mkdir -p "$OUTPUTS_PATH"
 
     # `swift build` cannot be used as it doesn't support building for iOS directly
     xcodebuild clean build \
-        -scheme $WRAPPER_NAME \
-        -configuration $CONFIGURATION \
-        -destination "generic/platform=$XCODEBUILD_PLATFORM_NAME" \
-        -derivedDataPath $DERIVED_DATA_PATH \
+        -scheme "$WRAPPER_NAME" \
+        -configuration "$CONFIGURATION" \
+        -destination "generic/platform=$XCODEBUILD_PLATFORM" \
+        -derivedDataPath "$DERIVED_DATA_PATH" \
         SKIP_INSTALL=NO \
         BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
         | xcbeautify
 
-    for MODULE in ${MODULES[@]}; do
-        for ARCH in $DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/${MODULE}.build/Objects-normal/*/ ; do
-            ARCH=$(basename $ARCH)
-            INTERFACE_PATH="$DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/${MODULE}.build/Objects-normal/$ARCH/${MODULE}.swiftinterface"
+    # Copy .swiftinterface files per architecture
+    for MODULE in "${MODULES[@]}"; do
+        for ARCH_DIR in "$DERIVED_DATA_PATH/Build/Intermediates.noindex/$SWIFT_SYNTAX_NAME.build/$CONFIGURATION"*/"$MODULE.build/Objects-normal/"/*/; do
+            ARCH=$(basename "$ARCH_DIR")
+            INTERFACE="$DERIVED_DATA_PATH/Build/Intermediates.noindex/$SWIFT_SYNTAX_NAME.build/$CONFIGURATION"*/"$MODULE.build/Objects-normal/$ARCH/$MODULE.swiftinterface"
             mkdir -p "$OUTPUTS_PATH/$ARCH"
-            cp $INTERFACE_PATH "$OUTPUTS_PATH/$ARCH"
-        done 
+            cp $INTERFACE "$OUTPUTS_PATH/$ARCH/"
+        done
     done
 
+    # Package object files into per-arch .a libraries, then lipo into a fat library.
+    # Merge .swiftinterface files, stripping the arch-specific target triple so the
+    # merged interface is usable from any architecture.
     LIPOFILES=""
-    for ARCH in $OUTPUTS_PATH/*/ ; do
-        ARCH=$(basename $ARCH)
-        # FIXME: figure out how to make xcodebuild output the .a file directly. For now, we package it ourselves.
-        ar -crs "$OUTPUTS_PATH/$ARCH/$LIBRARY_NAME" $DERIVED_DATA_PATH/Build/Intermediates.noindex/swift-syntax.build/$CONFIGURATION*/*.build/Objects-normal/$ARCH/*.o
+    for ARCH_DIR in "$OUTPUTS_PATH"/*/; do
+        ARCH=$(basename "$ARCH_DIR")
+        ar -crs "$OUTPUTS_PATH/$ARCH/$LIBRARY_NAME" \
+            "$DERIVED_DATA_PATH/Build/Intermediates.noindex/$SWIFT_SYNTAX_NAME.build/$CONFIGURATION"*/*.build/Objects-normal/"$ARCH"/*.o
         LIPOFILES="$LIPOFILES $OUTPUTS_PATH/$ARCH/$LIBRARY_NAME"
 
-        for INTERFFILE in $OUTPUTS_PATH/$ARCH/*.swiftinterface; do 
-            INTERFFILE=$(basename $INTERFFILE)
-            INPUTFILE=$OUTPUTS_PATH/$ARCH/$INTERFFILE
-            OUTPUTFILE=$OUTPUTS_PATH/$INTERFFILE
-            OUTPUTTMPFILE=$OUTPUTS_PATH/tmp_$INTERFFILE
-            if test -f "$OUTPUTFILE"; then
-                ARCH1=$(grep -o '\/\/ swift-module-flags: -target [^ ]*' $OUTPUTFILE)
-                ARCH1=${ARCH1##* }
-                ARCH2=$(grep -o '\/\/ swift-module-flags: -target [^ ]*' $INPUTFILE)
-                ARCH2=${ARCH2##* }
-                #sed "s/\/\/ swift-module-flags\: -target [^ ]* -/\/\/ swift-module-flags\: -target ${ARCH1} ${ARCH2} -/" "$OUTPUTFILE" > "$OUTPUTTMPFILE"
-                sed "s/\/\/ swift-module-flags\: -target [^ ]* -/\/\/ swift-module-flags\: -/" "$OUTPUTFILE" > "$OUTPUTTMPFILE"
-                mv "$OUTPUTTMPFILE" "$OUTPUTFILE"
+        for INPUTFILE in "$OUTPUTS_PATH/$ARCH/"*.swiftinterface; do
+            BASENAME=$(basename "$INPUTFILE")
+            OUTPUTFILE="$OUTPUTS_PATH/$BASENAME"
+            if [[ -f "$OUTPUTFILE" ]]; then
+                sed "s|// swift-module-flags: -target [^ ]* -|// swift-module-flags: -|" \
+                    "$OUTPUTFILE" > "$OUTPUTS_PATH/tmp_$BASENAME"
+                mv "$OUTPUTS_PATH/tmp_$BASENAME" "$OUTPUTFILE"
             else
                 cp "$INPUTFILE" "$OUTPUTFILE"
             fi
         done
-    done 
-    lipo $LIPOFILES -create -output $OUTPUTS_PATH/$LIBRARY_NAME
+    done
+
+    lipo $LIPOFILES -create -output "$OUTPUTS_PATH/$LIBRARY_NAME"
     XCODEBUILD_LIBRARIES="$XCODEBUILD_LIBRARIES -library $OUTPUTS_PATH/$LIBRARY_NAME"
 done
 
@@ -175,29 +142,27 @@ cd ..
 #
 
 XCFRAMEWORK_NAME="$WRAPPER_NAME.xcframework"
-XCFRAMEWORK_PATH="$XCFRAMEWORK_NAME"
 
 xcodebuild -quiet -create-xcframework \
     $XCODEBUILD_LIBRARIES \
-    -output "${XCFRAMEWORK_PATH}" >/dev/null
+    -output "$XCFRAMEWORK_NAME" >/dev/null
 
-for ARCH in $XCFRAMEWORK_PATH/*/ ; do
-    ARCH=$(basename $ARCH)
-    DEST="$XCFRAMEWORK_PATH/$ARCH"
-    SOURCE="${PLATFORMS_OUTPUTS_PATH}/$(echo $ARCH | cut -d'-' -f 1)_$(echo $ARCH | cut -d'-' -f 3)/*.swiftinterface"
-    cp  $SOURCE $DEST/
+for ARCH_DIR in "$XCFRAMEWORK_NAME"/*/; do
+    ARCH=$(basename "$ARCH_DIR")
+    PLATFORM_PREFIX="$(echo "$ARCH" | cut -d'-' -f 1)_$(echo "$ARCH" | cut -d'-' -f 3)"
+    cp "$PLATFORMS_OUTPUTS_PATH/$PLATFORM_PREFIX/"*.swiftinterface "$XCFRAMEWORK_NAME/$ARCH/"
 done
 
-zip --quiet --recurse-paths $XCFRAMEWORK_NAME.zip $XCFRAMEWORK_NAME
+zip --quiet --recurse-paths "$XCFRAMEWORK_NAME.zip" "$XCFRAMEWORK_NAME"
 
 #
-# Create package manifest
+# Generate Package.swift pointing to the released binary
 #
 
-CHECKSUM=$(swift package compute-checksum $XCFRAMEWORK_NAME.zip)
+CHECKSUM=$(swift package compute-checksum "$XCFRAMEWORK_NAME.zip")
 URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$SWIFT_SYNTAX_VERSION/$XCFRAMEWORK_NAME.zip"
 
-tee Package.swift <<EOF
+cat > Package.swift << EOF
 // swift-tools-version: 5.9
 
 import PackageDescription
