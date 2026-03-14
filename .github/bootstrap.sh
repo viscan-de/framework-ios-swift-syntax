@@ -33,7 +33,7 @@ swift-syntax version to build:  $SWIFT_SYNTAX_VERSION
 
 EOF
 
-set -eux
+set -euxo pipefail
 
 #
 # Clone package
@@ -45,16 +45,25 @@ git clone --branch $SWIFT_SYNTAX_VERSION --single-branch $SWIFT_SYNTAX_REPOSITOR
 # Add static wrapper product
 #
 
-sed -i '' -E "s/(products: \[)$/\1\n    .library(name: \"${WRAPPER_NAME}\", type: .static, targets: [\"${WRAPPER_NAME}\"]),/g" "$SWIFT_SYNTAX_NAME/Package.swift"
+# 602.0.0+: products is a standalone variable referenced in Package()
+# Older: products is an inline array inside Package()
+if grep -q "^  products: products,$" "$SWIFT_SYNTAX_NAME/Package.swift"; then
+    sed -i '' "s/^  products: products,$/  products: products + [.library(name: \"${WRAPPER_NAME}\", type: .static, targets: [\"${WRAPPER_NAME}\"])],/" "$SWIFT_SYNTAX_NAME/Package.swift"
+else
+    sed -i '' -E "s/(products: \[)$/\1\n    .library(name: \"${WRAPPER_NAME}\", type: .static, targets: [\"${WRAPPER_NAME}\"]),/g" "$SWIFT_SYNTAX_NAME/Package.swift"
+fi
 
 #
 # Add target for wrapper product
 #
 
-sed -i '' -E "s/^(    targets: \[)$/\1\n    .target(name: \"${WRAPPER_NAME}\", dependencies: [\"SwiftCompilerPlugin\", \"SwiftSyntax\", \"SwiftSyntaxBuilder\", \"SwiftSyntaxMacros\", \"SwiftSyntaxMacrosTestSupport\"]),/" "$SWIFT_SYNTAX_NAME/Package.swift"
+# Match both 2-space indent (602.0.0+) and 4-space indent (older versions)
+sed -i '' -E "s/^( {2,4}targets: \[)$/\1\n    .target(name: \"${WRAPPER_NAME}\", dependencies: [\"SwiftCompilerPlugin\", \"SwiftSyntax\", \"SwiftSyntaxBuilder\", \"SwiftSyntaxMacros\", \"SwiftSyntaxMacrosTestSupport\"]),/" "$SWIFT_SYNTAX_NAME/Package.swift"
 
 # for swift 600.x.y
 sed -i '' 's/, .version("6")//g' "$SWIFT_SYNTAX_NAME/Package.swift"
+
+cat "$SWIFT_SYNTAX_NAME/Package.swift"
 
 #
 # Add exported imports to wrapper target
