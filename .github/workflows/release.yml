@@ -21,11 +21,14 @@ jobs:
       with:
         xcode-version: latest-stable
     - run: .github/bootstrap.sh ${{ inputs.swift_syntax_tag }}
-    - uses: stefanzweifel/git-auto-commit-action@v5
-      with:
-        commit_message: Updated for release ${{ inputs.swift_syntax_tag }}
-        tagging_message: ${{ inputs.swift_syntax_tag }}
-        file_pattern: "*.swift Sources/*"
+    - name: Tag release commit (tag only — main branch is not updated)
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add Package.swift Sources/
+        git commit -m "Release ${{ inputs.swift_syntax_tag }}"
+        git tag "${{ inputs.swift_syntax_tag }}"
+        git push origin "${{ inputs.swift_syntax_tag }}"
     - uses: softprops/action-gh-release@v1
       with:
         draft: false
@@ -34,8 +37,3 @@ jobs:
         body: Release from swift-syntax ${{ inputs.swift_syntax_tag }}
         files: "*.xcframework.zip"
         fail_on_unmatched_files: true
-    - name: Remove Package.swift from main branch
-      run: |
-        git rm Package.swift
-        git commit -m "chore: remove Package.swift from main (see release ${{ inputs.swift_syntax_tag }})"
-        git push
