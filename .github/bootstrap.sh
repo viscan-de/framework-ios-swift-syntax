@@ -96,6 +96,9 @@ for ((i = 0; i < ${#PLATFORMS_XCODE[@]}; i++)); do
         -derivedDataPath "$DERIVED_DATA_PATH" \
         SKIP_INSTALL=NO \
         BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+        CLANG_ENABLE_MODULES=NO \
+        OTHER_CFLAGS="-gno-modules -ffile-prefix-map=\$(SRCROOT)= -fno-implicit-modules -fno-implicit-module-maps" \
+        OTHER_SWIFT_FLAGS="-cxx-interoperability-mode=default -enable-experimental-feature AccessLevelOnImport -debug-prefix-map \$(SRCROOT)= -Xfrontend -no-clang-module-breadcrumbs -Xcc -fno-implicit-modules -Xcc -fno-implicit-module-maps" \
         | xcbeautify
 
     # Copy .swiftinterface files per architecture
@@ -114,8 +117,27 @@ for ((i = 0; i < ${#PLATFORMS_XCODE[@]}; i++)); do
     LIPOFILES=""
     for ARCH_DIR in "$OUTPUTS_PATH"/*/; do
         ARCH=$(basename "$ARCH_DIR")
-        ar -crs "$OUTPUTS_PATH/$ARCH/$LIBRARY_NAME" \
-            "$DERIVED_DATA_PATH/Build/Intermediates.noindex/$SWIFT_SYNTAX_NAME.build/$CONFIGURATION"*/*.build/Objects-normal/"$ARCH"/*.o
+
+        # Prefix every .o with its module name before archiving so that object
+        # files with identical basenames from different modules (e.g. both
+        # SwiftSyntax and SwiftSyntaxBuilder compile a Convenience.swift →
+        # Convenience.o) end up as distinct archive members.  Duplicate member
+        # names cause ar's SYMDEF index to reference the wrong copy, which is
+        # what produces the "could not find symbol … in Convenience.o" linker
+        # warnings when downstream projects link against the library.
+        # libtool -static (Apple's native archiver) is used instead of ar so
+        # that Swift metadata sections are handled correctly.
+        OBJECTS_DIR="$OUTPUTS_PATH/${ARCH}_objects"
+        mkdir -p "$OBJECTS_DIR"
+        for MODULE_BUILD_DIR in "$DERIVED_DATA_PATH/Build/Intermediates.noindex/$SWIFT_SYNTAX_NAME.build/$CONFIGURATION"*/*.build; do
+            MODULE=$(basename "$MODULE_BUILD_DIR" .build)
+            for O_FILE in "$MODULE_BUILD_DIR/Objects-normal/$ARCH/"*.o; do
+                [[ -f "$O_FILE" ]] && cp "$O_FILE" "$OBJECTS_DIR/${MODULE}_$(basename "$O_FILE")"
+            done
+        done
+        libtool -static -o "$OUTPUTS_PATH/$ARCH/$LIBRARY_NAME" "$OBJECTS_DIR/"*.o
+        rm -rf "$OBJECTS_DIR"
+
         LIPOFILES="$LIPOFILES $OUTPUTS_PATH/$ARCH/$LIBRARY_NAME"
 
         for INPUTFILE in "$OUTPUTS_PATH/$ARCH/"*.swiftinterface; do
