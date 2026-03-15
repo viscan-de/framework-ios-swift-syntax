@@ -89,6 +89,9 @@ for ((i = 0; i < ${#PLATFORMS_XCODE[@]}; i++)); do
     mkdir -p "$OUTPUTS_PATH"
 
     # `swift build` cannot be used as it doesn't support building for iOS directly
+    # -no-clang-module-breadcrumbs prevents absolute PCM cache paths from being
+    # baked into .swiftinterface files, which would cause "missing pcm" warnings
+    # on any machine that didn't build the framework.
     xcodebuild clean build \
         -scheme "$WRAPPER_NAME" \
         -configuration "$CONFIGURATION" \
@@ -96,9 +99,7 @@ for ((i = 0; i < ${#PLATFORMS_XCODE[@]}; i++)); do
         -derivedDataPath "$DERIVED_DATA_PATH" \
         SKIP_INSTALL=NO \
         BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-        CLANG_ENABLE_MODULES=NO \
-        OTHER_CFLAGS="-gno-modules -ffile-prefix-map=\$(SRCROOT)= -fno-implicit-modules -fno-implicit-module-maps" \
-        OTHER_SWIFT_FLAGS="-cxx-interoperability-mode=default -enable-experimental-feature AccessLevelOnImport -debug-prefix-map \$(SRCROOT)= -Xfrontend -no-clang-module-breadcrumbs -Xcc -fno-implicit-modules -Xcc -fno-implicit-module-maps" \
+        OTHER_SWIFT_FLAGS="-Xfrontend -no-clang-module-breadcrumbs" \
         | xcbeautify
 
     # Copy .swiftinterface files per architecture
