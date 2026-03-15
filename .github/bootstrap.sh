@@ -99,6 +99,7 @@ for ((i = 0; i < ${#PLATFORMS_XCODE[@]}; i++)); do
         -derivedDataPath "$DERIVED_DATA_PATH" \
         SKIP_INSTALL=NO \
         BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+        SWIFT_ENABLE_EXPLICIT_MODULES=NO \
         OTHER_SWIFT_FLAGS="-Xfrontend -no-clang-module-breadcrumbs" \
         | xcbeautify
 
